@@ -64,3 +64,155 @@ jobs:
           tag_name: v${{ github.event.inputs.version }}
           files: niri-${{ github.event.inputs.version }}-vendored-dependencies.tar.xz
           fail_on_unmatched_files: true
+
+  build-deb:
+    runs-on: ubuntu-24.04
+    needs: prepare-release
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y curl gcc clang libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libpipewire-0.3-dev libpango1.0-dev libdisplay-info-dev libadwaita-1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --frozen --release
+
+      - name: Create .deb package
+        run: |
+          VERSION=${{ github.event.inputs.version }}
+          PKG=niri-deb
+
+          mkdir -p $PKG/DEBIAN
+          mkdir -p $PKG/usr/bin
+          mkdir -p $PKG/usr/share/wayland-sessions
+          mkdir -p $PKG/usr/share/xdg-desktop-portal
+          mkdir -p $PKG/usr/lib/systemd/user
+
+          install -m755 target/release/niri                  $PKG/usr/bin/niri
+          install -m755 resources/niri-session               $PKG/usr/bin/niri-session
+          install -m644 resources/niri.desktop               $PKG/usr/share/wayland-sessions/niri.desktop
+          install -m644 resources/niri-portals.conf          $PKG/usr/share/xdg-desktop-portal/niri-portals.conf
+          install -m644 resources/niri.service               $PKG/usr/lib/systemd/user/niri.service
+          install -m644 resources/niri-shutdown.target       $PKG/usr/lib/systemd/user/niri-shutdown.target
+
+          cat > $PKG/DEBIAN/control << EOF
+          Package: niri
+          Version: $VERSION
+          Section: x11
+          Priority: optional
+          Architecture: amd64
+          Depends: libwayland-client0 (>= 1.20), libinput10, libpipewire-0.3-0, libpangocairo-1.0-0, libseat1, libgbm1
+          Description: Scrollable-tiling Wayland compositor
+           A scrollable-tiling Wayland compositor.
+           Windows are arranged in columns on an infinite strip going to the right.
+           Opening a new window never causes existing windows to resize.
+          EOF
+
+          dpkg-deb --build --root-owner-group $PKG niri-${VERSION}-amd64.deb
+
+      - name: Upload .deb to release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload v${{ github.event.inputs.version }} niri-${{ github.event.inputs.version }}-amd64.deb
+
+  build-rpm:
+    runs-on: ubuntu-24.04
+    needs: prepare-release
+    container: fedora:latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            gcc clang git gh \
+            libudev-devel libgbm-devel libxkbcommon-devel \
+            wayland-devel libinput-devel dbus-devel \
+            systemd-devel libseat-devel libdisplay-info-devel \
+            pipewire-devel pango-devel cairo-gobject-devel \
+            mesa-libEGL-devel libadwaita-devel \
+            rpm-build curl
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --frozen --release
+
+      - name: Create .rpm package
+        run: |
+          VERSION=${{ github.event.inputs.version }}
+          mkdir -p ~/rpmbuild/{SOURCES,SPECS,RPMS,BUILD,BUILDROOT}
+
+          install -m755 target/release/niri                  ~/rpmbuild/SOURCES/niri
+          install -m755 resources/niri-session               ~/rpmbuild/SOURCES/niri-session
+          install -m644 resources/niri.desktop               ~/rpmbuild/SOURCES/niri.desktop
+          install -m644 resources/niri-portals.conf          ~/rpmbuild/SOURCES/niri-portals.conf
+          install -m644 resources/niri.service               ~/rpmbuild/SOURCES/niri.service
+          install -m644 resources/niri-shutdown.target       ~/rpmbuild/SOURCES/niri-shutdown.target
+
+          cat > ~/rpmbuild/SPECS/niri.spec << SPECEOF
+          %global debug_package %{nil}
+
+          Name:     niri
+          Version:  $VERSION
+          Release:  1%{?dist}
+          Summary:  Scrollable-tiling Wayland compositor
+          License:  GPL-3.0-or-later
+          URL:      https://github.com/niri-wm/niri
+
+          Requires: mesa-dri-drivers
+          Requires: mesa-libEGL
+          Requires: libwayland-server
+
+          %description
+          A scrollable-tiling Wayland compositor.
+          Windows are arranged in columns on an infinite strip going to the right.
+          Opening a new window never causes existing windows to resize.
+
+          %build
+
+          %install
+          install -Dm755 %{_sourcedir}/niri                %{buildroot}/usr/bin/niri
+          install -Dm755 %{_sourcedir}/niri-session        %{buildroot}/usr/bin/niri-session
+          install -Dm644 %{_sourcedir}/niri.desktop        %{buildroot}/usr/share/wayland-sessions/niri.desktop
+          install -Dm644 %{_sourcedir}/niri-portals.conf   %{buildroot}/usr/share/xdg-desktop-portal/niri-portals.conf
+          install -Dm644 %{_sourcedir}/niri.service        %{buildroot}/usr/lib/systemd/user/niri.service
+          install -Dm644 %{_sourcedir}/niri-shutdown.target %{buildroot}/usr/lib/systemd/user/niri-shutdown.target
+
+          %files
+          /usr/bin/niri
+          /usr/bin/niri-session
+          /usr/share/wayland-sessions/niri.desktop
+          %dir /usr/share/xdg-desktop-portal
+          /usr/share/xdg-desktop-portal/niri-portals.conf
+          /usr/lib/systemd/user/niri.service
+          /usr/lib/systemd/user/niri-shutdown.target
+
+          %changelog
+          SPECEOF
+
+          rpmbuild -bb ~/rpmbuild/SPECS/niri.spec
+          cp ~/rpmbuild/RPMS/$(uname -m)/niri-${VERSION}-1.*.rpm niri-${VERSION}-x86_64.rpm
+
+      - name: Upload .rpm to release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload v${{ github.event.inputs.version }} niri-${{ github.event.inputs.version }}-x86_64.rpm
