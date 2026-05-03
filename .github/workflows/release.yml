@@ -84,6 +84,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Vendor dependencies
+        run: |
+          mkdir .cargo
+          cargo vendor --locked > .cargo/config.toml
+
       - name: Build
         run: cargo build --frozen --release
 
@@ -151,6 +156,11 @@ jobs:
             rpm-build curl
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Vendor dependencies
+        run: |
+          mkdir .cargo
+          cargo vendor --locked > .cargo/config.toml
 
       - name: Build
         run: cargo build --frozen --release
