@@ -57,10 +57,10 @@ jobs:
       - name: Test
         run: cargo test --all --frozen --release -- --nocapture
 
-      - name: Draft release
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
           tag_name: v${{ github.event.inputs.version }}
           files: niri-${{ github.event.inputs.version }}-vendored-dependencies.tar.xz
           fail_on_unmatched_files: true
