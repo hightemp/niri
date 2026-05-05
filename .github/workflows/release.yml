@@ -116,6 +116,7 @@ jobs:
           Section: x11
           Priority: optional
           Architecture: amd64
+          Maintainer: hightemp <hightemp.unknown@gmail.com>
           Depends: libwayland-client0 (>= 1.20), libinput10, libpipewire-0.3-0, libpangocairo-1.0-0, libseat1, libgbm1
           Description: Scrollable-tiling Wayland compositor
            A scrollable-tiling Wayland compositor.
